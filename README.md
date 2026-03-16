@@ -38,21 +38,22 @@
 ```json
 [
   {
-    "owner": "你的GitHub用户名",
-    "repo": "仓库A名称",
+    "owner": "主账号用户名",
+    "repo": "主账号仓库A",
     "workflow": "main.yml",
     "ref": "main"
   },
   {
-    "owner": "你的GitHub用户名",
-    "repo": "仓库B名称",
-    "workflow": "schedule.yml",
-    "ref": "master"
+    "owner": "小号用户名",
+    "repo": "小号仓库B",
+    "workflow": "daily.yml",
+    "ref": "master",
+    "token": "ghp_这里填小号的专属Token..."
   }
 ]
 ```
 ```json
-[{"owner":"用户名","repo":"仓库名","workflow":"main.yml","ref":"main"}]
+[{"owner":"用户名","repo":"仓库名","workflow":"main.yml","ref":"main","token": "ghp_这里填专属Token..."}]
 ```
 
 #### Q2: 它是如何在 GitHub 保活的？
