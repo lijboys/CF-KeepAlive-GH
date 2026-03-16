@@ -1,8 +1,9 @@
 /**
- * GitHub Action 保活助手 (极简版 + TG通知)
+ * GitHub Action 保活助手 (极简版 + TG/微信通知)
  * * 功能：定时触发 GitHub Workflow，防止 60 天暂停
  * * 部署：Cloudflare Workers
- * * 配置：通过 Settings -> Variables 配置 TOKEN, REPOS, TG_TOKEN, TG_ID
+ * * 配置：通过 Settings -> Variables 配置 TOKEN, REPOS, TG_TOKEN, TG_ID, WX_URL
+ * * 定时设置：在 Triggers -> Cron Triggers 中设置 (例如每月25号: 0 0 25 * *)
  */
 
 export default {
@@ -20,8 +21,11 @@ export default {
     // 2. 获取 Telegram 配置 (可选)
     const tgToken = env.TG_TOKEN;
     const tgChatId = env.TG_ID;
+    
+    // 3. 获取微信通知配置 (可选，直接填入 域名/密码)
+    const wxUrl = env.WX_URL;
 
-    // 3. 获取项目列表
+    // 4. 获取项目列表
     let targets = [];
     if (env.REPOS) {
       try {
@@ -88,12 +92,28 @@ export default {
 
       await sendTelegramMessage(tgToken, tgChatId, message);
     }
+
+    // ================= 发送微信通知 =================
+    if (wxUrl) {
+      const nowStr = new Date().toLocaleString("zh-CN", {timeZone: "Asia/Shanghai"});
+      const title = "🤖 GitHub 保活任务报告";
+      
+      // 微信通知通常不支持 HTML 加粗，所以我们过滤掉 HTML 标签让排版更干净
+      const content = [
+        ...report.map(line => line.replace(/<[^>]+>/g, '')), 
+        `-----------------------------`,
+        `📊 统计: 成功 ${successCount} / 总计 ${targets.length}`,
+        `🕒 时间: ${nowStr}`
+      ].join("\n");
+
+      await sendWechatMessage(wxUrl, title, content);
+    }
   },
 
   // 支持浏览器直接访问测试
   async fetch(request, env, ctx) {
     await this.scheduled(null, env, ctx);
-    return new Response("手动运行完成，请查看 TG 消息或 Worker 日志。", { status: 200 });
+    return new Response("手动运行完成，请查看通知或 Worker 日志。", { status: 200 });
   }
 };
 
@@ -116,5 +136,26 @@ async function sendTelegramMessage(token, chatId, text) {
     console.log("✅ TG 通知发送成功");
   } catch (e) {
     console.error("❌ TG 发送失败:", e);
+  }
+}
+
+/**
+ * 发送微信通知 (调用自定义通知中心 JSON POST)
+ */
+async function sendWechatMessage(targetUrl, title, content) {
+  try {
+    await fetch(targetUrl, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json; charset=utf-8" 
+      },
+      body: JSON.stringify({
+        title: title,
+        body: content
+      })
+    });
+    console.log("✅ 微信通知发送请求已发出");
+  } catch (e) {
+    console.error("❌ 微信通知发送失败:", e);
   }
 }
