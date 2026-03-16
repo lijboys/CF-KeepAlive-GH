@@ -68,14 +68,17 @@ export default {
 
         if (response.status === 204) {
           successCount++;
-          report.push(`✅ <b>${target.repo}</b>: 成功`);
+          // 修改这里：改成 target.owner - target.repo
+          report.push(`✅ <b>${target.owner} - ${target.repo}</b>: 成功`);
         } else {
           const errorText = await response.text();
-          report.push(`❌ <b>${target.repo}</b>: 失败 (${response.status})`);
+          // 修改这里：改成 target.owner - target.repo
+          report.push(`❌ <b>${target.owner} - ${target.repo}</b>: 失败 (${response.status})`);
           console.error(`失败详情: ${errorText}`);
         }
       } catch (err) {
-        report.push(`❌ <b>${target.repo}</b>: 错误 - ${err.message}`);
+        // 修改这里：改成 target.owner - target.repo
+        report.push(`❌ <b>${target.owner} - ${target.repo}</b>: 错误 - ${err.message}`);
       }
     }
 
@@ -101,15 +104,18 @@ export default {
     // ================= 发送微信通知 =================
     if (wxUrl) {
       const nowStr = new Date().toLocaleString("zh-CN", {timeZone: "Asia/Shanghai"});
-      const title = "🤖 GitHub 保活任务报告";
       
-      // 微信通知通常不支持 HTML 加粗，所以我们过滤掉 HTML 标签让排版更干净
+      // 优化1 (微信卡片外面看)：把成功数量直接写进标题，不点开也能一眼把握全局！
+      const title = `🤖 保活完毕: 成功 ${successCount}/${targets.length} 个`;
+      
+      // 优化2 (微信详情里面看)：用双换行拉开间距，去除多余符号，排版更通透
       const content = [
-        ...report.map(line => line.replace(/<[^>]+>/g, '')), 
-        `-----------------------------`,
-        `📊 统计: 成功 ${successCount} / 总计 ${targets.length}`,
-        `🕒 时间: ${nowStr}`
-      ].join("\n");
+        `🕒 时间: ${nowStr}`,
+        `---------- 执行明细 ----------`,
+        ...report.map(line => line.replace(/<[^>]+>/g, '')), // 去掉TG用的加粗HTML标签
+        `------------------------------`,
+        `💡 你的项目正在被安全守护中`
+      ].join("\n\n"); // 注意这里改成了 \n\n，让每行之间有空隙，没那么挤
 
       await sendWechatMessage(wxUrl, title, content);
     }
@@ -117,8 +123,16 @@ export default {
 
   // 支持浏览器直接访问测试
   async fetch(request, env, ctx) {
-    await this.scheduled(null, env, ctx);
-    return new Response("手动运行完成，请查看通知或 Worker 日志。", { status: 200 });
+    const url = new URL(request.url);
+    
+    // 加一把“锁”：只有访问 /run 路径时才触发，防止 CF 编辑器部署预览时误触
+    if (url.pathname === '/run') {
+      await this.scheduled(null, env, ctx);
+      return new Response("手动触发运行完成，请查看通知或 Worker 日志。", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+    
+    // 普通访问只显示状态，不执行保活
+    return new Response("🤖 GitHub 保活 Worker 运行正常 🟢\n\n如果需要手动触发测试，请在当前网址末尾加上 /run 并回车访问。", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 };
 
