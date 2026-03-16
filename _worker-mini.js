@@ -106,7 +106,7 @@ export default {
       const nowStr = new Date().toLocaleString("zh-CN", {timeZone: "Asia/Shanghai"});
       
       // 优化1 (微信卡片外面看)：把成功数量直接写进标题，不点开也能一眼把握全局！
-      const title = `🤖 保活完毕: 成功 ${successCount}/${targets.length} 个`;
+      const title = `🤖 Github保活完毕: 成功 ${successCount}/${targets.length} 个`;
       
       // 优化2 (微信详情里面看)：用双换行拉开间距，去除多余符号，排版更通透
       const content = [
@@ -142,7 +142,7 @@ export default {
 async function sendTelegramMessage(token, chatId, text) {
   try {
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -152,29 +152,49 @@ async function sendTelegramMessage(token, chatId, text) {
         disable_web_page_preview: true
       })
     });
-    console.log("✅ TG 通知发送成功");
+    if (res.ok) {
+        console.log("✅ TG 通知发送成功");
+    } else {
+        const errText = await res.text();
+        console.error("❌ TG 通知失败:", errText);
+    }
   } catch (e) {
-    console.error("❌ TG 发送失败:", e);
+    console.error("❌ TG 发送异常:", e);
   }
 }
 
 /**
- * 发送微信通知 (调用自定义通知中心 JSON POST)
+ * 发送微信通知 (针对你的专属 Push 代码适配)
  */
 async function sendWechatMessage(targetUrl, title, content) {
   try {
-    await fetch(targetUrl, {
+    // 智能解析用户填写的 WX_URL (例如 https://域名.workers.dev/超复杂密码)
+    const urlObj = new URL(targetUrl);
+    // 从路径中提取出第一段作为密钥
+    const authKey = urlObj.pathname.split('/').filter(Boolean)[0] || '';
+
+    const res = await fetch(targetUrl, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json; charset=utf-8" 
       },
+      // 完美契合你的 JSON 解析逻辑：包含 key, title, content
       body: JSON.stringify({
+        key: authKey,      // 核心修复点：把提取出来的密码传给你的后端
         title: title,
-        body: content
+        content: content   // 你的代码明确通过 body.content 接收正文
       })
     });
-    console.log("✅ 微信通知发送请求已发出");
+    
+    // 获取对方服务器的真实返回信息，方便调试
+    const resText = await res.text();
+    
+    if (res.ok) {
+      console.log("✅ 微信通知发送成功，对方返回:", resText);
+    } else {
+      console.error(`❌ 微信通知失败! 状态码: ${res.status}, 对方报错信息: ${resText}`);
+    }
   } catch (e) {
-    console.error("❌ 微信通知发送失败:", e);
+    console.error("❌ 微信通知请求发生网络错误:", e);
   }
 }
