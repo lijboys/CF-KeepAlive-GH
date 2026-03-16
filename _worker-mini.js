@@ -11,12 +11,8 @@ export default {
     console.log(`[Start] 开始执行保活任务...`);
 
     // ================= 配置解析 =================
-    // 1. 获取 GitHub Token
-    const ghToken = env.TOKEN;
-    if (!ghToken) {
-      console.error("❌ 未检测到 TOKEN 环境变量，请在 Settings -> Variables 中配置");
-      return;
-    }
+    // 1. 获取全局 GitHub Token (作为兜底，如果项目自带token则优先用自带的)
+    const globalToken = env.TOKEN;
 
     // 2. 获取 Telegram 配置 (可选)
     const tgToken = env.TG_TOKEN;
@@ -45,6 +41,15 @@ export default {
 
     for (const target of targets) {
       try {
+        // 核心逻辑：优先使用项目专属 Token，没有则使用全局 Token
+        const currentToken = target.token || globalToken;
+        
+        if (!currentToken) {
+          report.push(`❌ <b>${target.repo}</b>: 失败 (未配置 Token)`);
+          console.error(`❌ ${target.repo} 缺少 Token，跳过执行`);
+          continue; // 如果既没有专属token，也没有全局token，就跳过这个项目
+        }
+
         const url = `https://api.github.com/repos/${target.owner}/${target.repo}/actions/workflows/${target.workflow}/dispatches`;
         
         console.log(`正在触发: ${target.repo}`);
@@ -52,7 +57,7 @@ export default {
         const response = await fetch(url, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${ghToken}`,
+            "Authorization": `Bearer ${currentToken}`,
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "CF-Worker-KeepAlive"
           },
