@@ -101,8 +101,9 @@
 | `REPOS`  | ✅ 是    | `[{"owner":"test",...}]` | 第一步整理的保活项目 JSON 字符串（**需压缩为一行，保证格式合法**） |
 | `TIME`   | ❌ 否    | `40-60`               | 随机触发的天数区间，默认值 `40-60`，可自定义（例：`30-50`）|
 | `TG_TOKEN` | ❌ 否  | `123456:ABCdefxxxx`   | Telegram 机器人 Token（需要TG通知时填写）|
-| `WX_URL` | ❌ 否  | `[123456:ABCdefxxxx](https://域名.workers.dev/密码)`   |  你的自定义微信通知 API，直接填完整链接即可|
 | `TG_ID`  | ❌ 否    | `12345678`            | Telegram 聊天ID（需要TG通知时填写，与TG_TOKEN配套使用）|
+| `WX_URL` | ❌ 否  | `[123456:ABCdefxxxx](https://域名.workers.dev/密码)`   |  你的自定义微信通知 API，直接填完整链接即可|
+| `MY_URL` | ❌ 否  | `[[123456:ABCdefxxxx](https://域名.workers.dev/密码)](https://保活域名.com)`   |  你的 Worker 访问域名。因为半夜定时运行时代码不知道自己的域名，填上这个，半夜微信发通知时才能附带详情网页链接 |
 
 > 💡 重要提示：`REPOS` 为核心变量，**必须是合法的 JSON 字符串**，格式错误会导致脚本运行失败。
 
