@@ -1,9 +1,8 @@
 /**
- * GitHub Action 保活助手 (极简版 + TG/微信通知)
+ * GitHub Action 保活助手 (极简版 + TG/微信通知 + 专属网页详情)
  * * 功能：定时触发 GitHub Workflow，防止 60 天暂停
  * * 部署：Cloudflare Workers
- * * 配置：通过 Settings -> Variables 配置 TOKEN, REPOS, TG_TOKEN, TG_ID, WX_URL
- * * 定时设置：在 Triggers -> Cron Triggers 中设置 (例如每月25号: 0 0 25 * *)
+ * * 配置：通过 Settings -> Variables 配置 TOKEN, REPOS, TG_TOKEN, TG_ID, WX_URL, MY_URL
  */
 
 export default {
@@ -11,17 +10,14 @@ export default {
     console.log(`[Start] 开始执行保活任务...`);
 
     // ================= 配置解析 =================
-    // 1. 获取全局 GitHub Token (作为兜底，如果项目自带token则优先用自带的)
     const globalToken = env.TOKEN;
-
-    // 2. 获取 Telegram 配置 (可选)
     const tgToken = env.TG_TOKEN;
     const tgChatId = env.TG_ID;
-    
-    // 3. 获取微信通知配置 (可选，直接填入 域名/密码)
     const wxUrl = env.WX_URL;
+    
+    // 获取当前 Worker 的域名 (用于生成详情页链接)
+    const myUrl = env.MY_URL; 
 
-    // 4. 获取项目列表
     let targets = [];
     if (env.REPOS) {
       try {
@@ -41,13 +37,10 @@ export default {
 
     for (const target of targets) {
       try {
-        // 核心逻辑：优先使用项目专属 Token，没有则使用全局 Token
         const currentToken = target.token || globalToken;
-        
         if (!currentToken) {
-          report.push(`❌ <b>${target.repo}</b>: 失败 (未配置 Token)`);
-          console.error(`❌ ${target.repo} 缺少 Token，跳过执行`);
-          continue; // 如果既没有专属token，也没有全局token，就跳过这个项目
+          report.push(`❌ ${target.owner} - ${target.repo}: 失败 (未配Token)`);
+          continue;
         }
 
         const url = `https://api.github.com/repos/${target.owner}/${target.repo}/actions/workflows/${target.workflow}/dispatches`;
@@ -61,83 +54,112 @@ export default {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "CF-Worker-KeepAlive"
           },
-          body: JSON.stringify({
-            ref: target.ref
-          })
+          body: JSON.stringify({ ref: target.ref })
         });
 
         if (response.status === 204) {
           successCount++;
-          // 修改这里：改成 target.owner - target.repo
-          report.push(`✅ <b>${target.owner} - ${target.repo}</b>: 成功`);
+          report.push(`✅ ${target.owner} - ${target.repo}: 成功`);
         } else {
           const errorText = await response.text();
-          // 修改这里：改成 target.owner - target.repo
-          report.push(`❌ <b>${target.owner} - ${target.repo}</b>: 失败 (${response.status})`);
+          report.push(`❌ ${target.owner} - ${target.repo}: 失败 (${response.status})`);
           console.error(`失败详情: ${errorText}`);
         }
       } catch (err) {
-        // 修改这里：改成 target.owner - target.repo
-        report.push(`❌ <b>${target.owner} - ${target.repo}</b>: 错误 - ${err.message}`);
+        report.push(`❌ ${target.owner} - ${target.repo}: 错误 - ${err.message}`);
       }
     }
 
-    // 打印日志
-    console.log(report.join("\n").replace(/<[^>]+>/g, '')); // 打印时去掉HTML标签
+    console.log(report.join("\n"));
 
     // ================= 发送 Telegram 通知 =================
     if (tgToken && tgChatId) {
       const nowStr = new Date().toLocaleString("zh-CN", {timeZone: "Asia/Shanghai"});
-      
       const message = [
         `🤖 <b>GitHub 保活任务报告</b>`,
         `-----------------------------`,
-        ...report,
+        ...report.map(line => line.replace('✅', '✅ <b>').replace('❌', '❌ <b>').replace(':', '</b>:')), // 简单加粗处理
         `-----------------------------`,
         `📊 <b>统计:</b> 成功 ${successCount} / 总计 ${targets.length}`,
         `🕒 <b>时间:</b> ${nowStr}`
       ].join("\n");
-
       await sendTelegramMessage(tgToken, tgChatId, message);
     }
 
     // ================= 发送微信通知 =================
     if (wxUrl) {
       const nowStr = new Date().toLocaleString("zh-CN", {timeZone: "Asia/Shanghai"});
+      const title = `🤖 保活完毕: 成功 ${successCount}/${targets.length} 个`;
       
-      // 优化1 (微信卡片外面看)：把成功数量直接写进标题，不点开也能一眼把握全局！
-      const title = `🤖 Github保活完毕: 成功 ${successCount}/${targets.length} 个`;
-      
-      // 优化2 (微信详情里面看)：用双换行拉开间距，去除多余符号，排版更通透
       const content = [
-        `🕒 时间: ${nowStr}`,
-        `---------- 执行明细 ----------`,
-        ...report.map(line => line.replace(/<[^>]+>/g, '')), // 去掉TG用的加粗HTML标签
+        `🕒 执行时间: ${nowStr}`,
+        `------------------------------`,
+        ...report,
         `------------------------------`,
         `💡 你的项目正在被安全守护中`
-      ].join("\n\n"); // 注意这里改成了 \n\n，让每行之间有空隙，没那么挤
+      ].join("\n\n");
 
-      await sendWechatMessage(wxUrl, title, content);
+      // 将 myUrl 传给微信发送函数，用于生成专属网页链接
+      await sendWechatMessage(wxUrl, title, content, myUrl);
     }
   },
 
-  // 支持浏览器直接访问测试
+  // 支持浏览器直接访问测试 & 渲染详情页
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     
-    // 加一把“锁”：只有访问 /run 路径时才触发，防止 CF 编辑器部署预览时误触
+    // === 新增：网页详情渲染路由 ===
+    if (url.pathname === '/detail') {
+      const title = url.searchParams.get('title') || '通知详情';
+      const content = url.searchParams.get('content') || '暂无内容';
+      
+      // 内置一个精美的移动端适配网页
+      const html = `
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <title>${title}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f5f7; color: #333; margin: 0; padding: 20px; line-height: 1.6; }
+            .container { max-width: 600px; margin: 0 auto; }
+            .card { background: #ffffff; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+            .header { border-bottom: 1px solid #eee; padding-bottom: 16px; margin-bottom: 16px; }
+            h2 { margin: 0; font-size: 20px; color: #173177; font-weight: 600; }
+            pre { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; font-size: 15px; color: #444; }
+            .footer { margin-top: 24px; text-align: center; font-size: 12px; color: #999; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="card">
+              <div class="header">
+                <h2>${title}</h2>
+              </div>
+              <pre>${content}</pre>
+            </div>
+            <div class="footer">🚀 Powered by Cloudflare Workers</div>
+          </div>
+        </body>
+        </html>
+      `;
+      return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    
+    // === 原有的防误触手动触发锁 ===
     if (url.pathname === '/run') {
-      await this.scheduled(null, env, ctx);
+      // 修改这里：自动提取当前访问的域名 (例如 https://abc.com) 并传给 scheduled
+      await this.scheduled(null, env, ctx, url.origin);
       return new Response("手动触发运行完成，请查看通知或 Worker 日志。", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
     
-    // 普通访问只显示状态，不执行保活
-    return new Response("🤖 GitHub 保活 Worker 运行正常 🟢\n\n如果需要手动触发测试，请在当前网址末尾加上 /run 并回车访问。", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return new Response("🤖 GitHub 保活 Worker 运行正常 🟢\n\n测试运行请访问 /run", { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 };
 
 /**
- * 发送 Telegram 消息 (HTML 模式)
+ * 发送 Telegram 消息
  */
 async function sendTelegramMessage(token, chatId, text) {
   try {
@@ -145,56 +167,47 @@ async function sendTelegramMessage(token, chatId, text) {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: text,
-        parse_mode: "HTML", // 启用 HTML 格式以支持加粗
-        disable_web_page_preview: true
-      })
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true })
     });
-    if (res.ok) {
-        console.log("✅ TG 通知发送成功");
-    } else {
-        const errText = await res.text();
-        console.error("❌ TG 通知失败:", errText);
-    }
   } catch (e) {
     console.error("❌ TG 发送异常:", e);
   }
 }
 
 /**
- * 发送微信通知 (针对你的专属 Push 代码适配)
+ * 发送微信通知 (带详情页链接生成)
  */
-async function sendWechatMessage(targetUrl, title, content) {
+async function sendWechatMessage(targetUrl, title, content, myUrl) {
   try {
-    // 智能解析用户填写的 WX_URL (例如 https://域名.workers.dev/超复杂密码)
     const urlObj = new URL(targetUrl);
-    // 从路径中提取出第一段作为密钥
     const authKey = urlObj.pathname.split('/').filter(Boolean)[0] || '';
+
+    // 生成指向本 Worker 的详情页链接
+    let clickUrl = "https://github.com";
+    if (myUrl) {
+      const cleanMyUrl = myUrl.replace(/\/$/, ''); // 去掉结尾可能多余的斜杠
+      // 将内容编码后放入 URL 参数中，点开后由 /detail 路由渲染成网页
+      clickUrl = `${cleanMyUrl}/detail?title=${encodeURIComponent(title)}&content=${encodeURIComponent(content)}`;
+    }
 
     const res = await fetch(targetUrl, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json; charset=utf-8" 
-      },
-      // 完美契合你的 JSON 解析逻辑：包含 key, title, content
+      headers: { "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({
-        key: authKey,      // 核心修复点：把提取出来的密码传给你的后端
+        key: authKey,      
         title: title,
-        content: content   // 你的代码明确通过 body.content 接收正文
+        content: content,
+        url: clickUrl // 这里传入我们精心生成的详情网页链接！
       })
     });
     
-    // 获取对方服务器的真实返回信息，方便调试
     const resText = await res.text();
-    
     if (res.ok) {
-      console.log("✅ 微信通知发送成功，对方返回:", resText);
+      console.log("✅ 微信通知发送成功");
     } else {
-      console.error(`❌ 微信通知失败! 状态码: ${res.status}, 对方报错信息: ${resText}`);
+      console.error(`❌ 微信通知失败! 状态码: ${res.status}, 报错: ${resText}`);
     }
   } catch (e) {
-    console.error("❌ 微信通知请求发生网络错误:", e);
+    console.error("❌ 微信请求网络错误:", e);
   }
 }
